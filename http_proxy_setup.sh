@@ -1,73 +1,90 @@
-#!/bin/bash
+DEFAULT_SOCKS_START_PORT=20000                         # 默认 SOCKS5 起始端口
+DEFAULT_HTTP_START_PORT=30000                         # 默认 HTTP 起始端口
+DEFAULT_SOCKS_USERNAME="userb"                        # 默认 SOCKS5 账号
+DEFAULT_SOCKS_PASSWORD="passwordb"                   # 默认 SOCKS5 密码
+DEFAULT_HTTP_USERNAME="userh"                        # 默认 HTTP 账号
+DEFAULT_HTTP_PASSWORD="passwordh"                   # 默认 HTTP 密码
 
-# 获取传入的用户名、密码
-USER=${1:-user}      # 默认用户名 user
-PASS=${2:-pass}      # 默认密码 pass
-START_PORT=${3:-30000}  # 默认起始端口 30000
+IP_ADDRESSES=($(hostname -I))
 
-# 检测系统类型 (Debian/Ubuntu 或 CentOS)
-if [[ -f /etc/debian_version ]]; then
-    OS="debian"
-elif [[ -f /etc/redhat-release ]]; then
-    OS="centos"
-else
-    echo "Unsupported OS"
-    exit 1
-fi
+install_xray() {
+    echo "安装 Xray..."
+    apt-get install unzip -y || yum install unzip -y
+    wget https://github.com/XTLS/Xray-core/releases/download/v1.8.3/Xray-linux-64.zip
+    unzip Xray-linux-64.zip
+    mv xray /usr/local/bin/xrayL
+    chmod +x /usr/local/bin/xrayL
+    cat <<EOF >/etc/systemd/system/xrayL.service
+[Unit]
+Description=XrayL Service
+After=network.target
 
-# 安装 3proxy 代理软件
-install_3proxy() {
-    if [[ "$OS" == "debian" ]]; then
-        apt update && apt install -y 3proxy
-    elif [[ "$OS" == "centos" ]]; then
-        yum install -y epel-release && yum install -y 3proxy
-    fi
+[Service]
+ExecStart=/usr/local/bin/xrayL -c /etc/xrayL/config.toml
+Restart=on-failure
+User=nobody
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable xrayL.service
+    systemctl start xrayL.service
+    echo "Xray 安装完成."
 }
 
-install_3proxy
+config_xray() {
+    mkdir -p /etc/xrayL
+    config_content=""
 
-# 获取所有 IPv4 地址（去掉 IPv6）
-IP_LIST=$(hostname -I | tr ' ' '\n' | grep -E "^[0-9]+\.[0-9]+")
+    for ((i = 0; i < ${#IP_ADDRESSES[@]}; i++)); do
+        # SOCKS5 代理配置
+        config_content+="[[inbounds]]\n"
+        config_content+="port = $((DEFAULT_SOCKS_START_PORT + i))\n"
+        config_content+="protocol = \"socks\"\n"
+        config_content+="tag = \"socks_$((i + 1))\"\n"
+        config_content+="[inbounds.settings]\n"
+        config_content+="auth = \"password\"\n"
+        config_content+="udp = true\n"
+        config_content+="ip = \"${IP_ADDRESSES[i]}\"\n"
+        config_content+="[[inbounds.settings.accounts]]\n"
+        config_content+="user = \"$DEFAULT_SOCKS_USERNAME\"\n"
+        config_content+="pass = \"$DEFAULT_SOCKS_PASSWORD\"\n\n"
 
-# 初始化端口计数器
-PORT=$START_PORT
+        # HTTP 代理配置
+        config_content+="[[inbounds]]\n"
+        config_content+="port = $((DEFAULT_HTTP_START_PORT + i))\n"
+        config_content+="protocol = \"http\"\n"
+        config_content+="tag = \"http_$((i + 1))\"\n"
+        config_content+="[inbounds.settings]\n"
+        config_content+="auth = \"password\"\n"
+        config_content+="ip = \"${IP_ADDRESSES[i]}\"\n"
+        config_content+="[[inbounds.settings.accounts]]\n"
+        config_content+="user = \"$DEFAULT_HTTP_USERNAME\"\n"
+        config_content+="pass = \"$DEFAULT_HTTP_PASSWORD\"\n\n"
 
-# 创建 3proxy 配置文件
-echo "daemon
-maxconn 200
-nserver 8.8.8.8
-nserver 8.8.4.4
-auth strong
-users $USER:CL:$PASS" > /etc/3proxy.cfg
-
-# 绑定每个 IP 到不同端口
-for IP in $IP_LIST; do
-    echo "proxy -n -a -p$PORT -i$IP -e$IP" >> /etc/3proxy.cfg
-    ((PORT++))
-done
-
-# 允许端口访问
-if [[ "$OS" == "debian" ]]; then
-    for ((i=START_PORT; i<PORT; i++)); do
-        ufw allow $i/tcp
+        # 出站规则
+        config_content+="[[outbounds]]\n"
+        config_content+="sendThrough = \"${IP_ADDRESSES[i]}\"\n"
+        config_content+="protocol = \"freedom\"\n"
+        config_content+="tag = \"out_$((i + 1))\"\n\n"
     done
-elif [[ "$OS" == "centos" ]]; then
-    for ((i=START_PORT; i<PORT; i++)); do
-        firewall-cmd --permanent --add-port=$i/tcp
-    done
-    firewall-cmd --reload
-fi
+    echo -e "$config_content" >/etc/xrayL/config.toml
+    systemctl restart xrayL.service
+    systemctl --no-pager status xrayL.service
+    echo "\n生成 SOCKS5 和 HTTP 配置完成\n"
+    echo "SOCKS5 起始端口: $DEFAULT_SOCKS_START_PORT"
+    echo "HTTP 起始端口: $DEFAULT_HTTP_START_PORT"
+    echo "SOCKS5 账号: $DEFAULT_SOCKS_USERNAME"
+    echo "SOCKS5 密码: $DEFAULT_SOCKS_PASSWORD"
+    echo "HTTP 账号: $DEFAULT_HTTP_USERNAME"
+    echo "HTTP 密码: $DEFAULT_HTTP_PASSWORD"
+}
 
-# 启动 3proxy 代理服务
-pkill 3proxy
-nohup 3proxy /etc/3proxy.cfg > /dev/null 2>&1 &
+main() {
+    [ -x "$(command -v xrayL)" ] || install_xray
+    config_xray
+}
 
-echo "HTTP Proxy Setup Complete!"
-echo "=========================="
-echo "Proxy IPs:"
-PORT=$START_PORT
-for IP in $IP_LIST; do
-    echo "http://$USER:$PASS@$IP:$PORT"
-    ((PORT++))
-done
-echo "=========================="
+main
