@@ -1,17 +1,15 @@
 #!/bin/bash
 
-# 提示用户输入 SOCKS5 代理的用户名和密码
-read -p "请输入 SOCKS5 代理用户名: " SOCKS5_USER
-read -s -p "请输入 SOCKS5 代理密码: " SOCKS5_PASS
-echo ""  # 换行
-
-# 提示用户输入 HTTP 代理的用户名和密码
-read -p "请输入 HTTP 代理用户名: " HTTP_USER
-read -s -p "请输入 HTTP 代理密码: " HTTP_PASS
-echo ""  # 换行
-
 DEFAULT_START_PORT_SOCKS5=20000  # 默认 SOCKS5 代理起始端口
 DEFAULT_START_PORT_HTTP=30000    # 默认 HTTP 代理起始端口
+
+# 让用户手动输入 SOCKS5 和 HTTP 代理的用户名和密码
+read -p "请输入 SOCKS5 代理用户名: " DEFAULT_SOCKS_USERNAME
+read -s -p "请输入 SOCKS5 代理密码: " DEFAULT_SOCKS_PASSWORD
+echo ""  # 换行
+read -p "请输入 HTTP 代理用户名: " DEFAULT_HTTP_USERNAME
+read -s -p "请输入 HTTP 代理密码: " DEFAULT_HTTP_PASSWORD
+echo ""  # 换行
 
 IP_ADDRESSES=($(hostname -I)) # 获取所有 IP 地址
 
@@ -63,8 +61,8 @@ EOF
         "auth": "password",
         "accounts": [
           {
-            "user": "$SOCKS5_USER",
-            "pass": "$SOCKS5_PASS"
+            "user": "$DEFAULT_SOCKS_USERNAME",
+            "pass": "$DEFAULT_SOCKS_PASSWORD"
           }
         ],
         "udp": true
@@ -77,8 +75,8 @@ EOF
       "settings": {
         "accounts": [
           {
-            "user": "$HTTP_USER",
-            "pass": "$HTTP_PASS"
+            "user": "$DEFAULT_HTTP_USERNAME",
+            "pass": "$DEFAULT_HTTP_PASSWORD"
           }
         ],
         "allowTransparent": false
@@ -114,8 +112,8 @@ restart_xray() {
 display_proxy_info() {
     echo "✅ 代理配置完成!"
     for ip in "${IP_ADDRESSES[@]}"; do
-        echo "🔹 SOCKS5 代理: socks5://$SOCKS5_USER:$SOCKS5_PASS@$ip:$DEFAULT_START_PORT_SOCKS5"
-        echo "🔹 HTTP  代理: http://$HTTP_USER:$HTTP_PASS@$ip:$DEFAULT_START_PORT_HTTP"
+        echo "🔹 SOCKS5 代理: socks5://$DEFAULT_SOCKS_USERNAME:$DEFAULT_SOCKS_PASSWORD@$ip:$DEFAULT_START_PORT_SOCKS5"
+        echo "🔹 HTTP  代理: http://$DEFAULT_HTTP_USERNAME:$DEFAULT_HTTP_PASSWORD@$ip:$DEFAULT_START_PORT_HTTP"
         ((DEFAULT_START_PORT_SOCKS5++))
         ((DEFAULT_START_PORT_HTTP++))
     done
