@@ -2,19 +2,15 @@
 
 DEFAULT_START_PORT_SOCKS5=20000  # 默认 SOCKS5 代理起始端口
 DEFAULT_START_PORT_HTTP=30000    # 默认 HTTP 代理起始端口
-
-# 让用户手动输入 SOCKS5 和 HTTP 代理的用户名和密码
-read -p "请输入 SOCKS5 代理用户名: " DEFAULT_SOCKS_USERNAME
-read -s -p "请输入 SOCKS5 代理密码: " DEFAULT_SOCKS_PASSWORD
-echo ""  # 换行
-read -p "请输入 HTTP 代理用户名: " DEFAULT_HTTP_USERNAME
-read -s -p "请输入 HTTP 代理密码: " DEFAULT_HTTP_PASSWORD
-echo ""  # 换行
+DEFAULT_SOCKS_USERNAME="userb"   # 默认 SOCKS5 账号
+DEFAULT_SOCKS_PASSWORD="passwordb" # 默认 SOCKS5 密码
+DEFAULT_HTTP_USERNAME="userb"    # 默认 HTTP 账号
+DEFAULT_HTTP_PASSWORD="passwordb" # 默认 HTTP 密码
 
 IP_ADDRESSES=($(hostname -I)) # 获取所有 IP 地址
 
 install_xray() {
-    echo "安装 Xray..."
+    echo "📌 安装 Xray..."
     apt-get update -y
     apt-get install unzip -y || yum install unzip -y
     wget -qO /tmp/Xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
@@ -104,9 +100,18 @@ EOF
 }
 
 restart_xray() {
+    echo "🔄 重启 Xray 代理..."
     systemctl restart xray.service
     systemctl status xray.service --no-pager
     echo "✅ Xray 代理已启动."
+}
+
+enable_xray_autostart() {
+    echo "📌 设置代理 **开机自启**..."
+    systemctl enable xray
+    systemctl restart xray
+    systemctl status xray --no-pager
+    echo "✅ Xray 代理开机自启 **已启用**！"
 }
 
 display_proxy_info() {
@@ -123,6 +128,7 @@ main() {
     [ -x "$(command -v xray)" ] || install_xray
     generate_config
     restart_xray
+    enable_xray_autostart
     display_proxy_info
 }
 
