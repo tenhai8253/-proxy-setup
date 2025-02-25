@@ -1,24 +1,22 @@
 #!/bin/bash
 
-DEFAULT_START_PORT_SOCKS5=20000  # 默认 SOCKS5 代理起始端口
-DEFAULT_START_PORT_HTTP=30000    # 默认 HTTP 代理起始端口
+read -p "请输入 SOCKS5 代理起始端口（默认 20000）: " START_PORT_SOCKS5
+START_PORT_SOCKS5=${START_PORT_SOCKS5:-20000}
 
-read -p "请输入 SOCKS5 代理用户名 (默认 userb): " SOCKS_USERNAME
-SOCKS_USERNAME=${SOCKS_USERNAME:-userb}
+read -p "请输入 HTTP 代理起始端口（默认 30000）: " START_PORT_HTTP
+START_PORT_HTTP=${START_PORT_HTTP:-30000}
 
-read -p "请输入 SOCKS5 代理密码 (默认 passwordb): " SOCKS_PASSWORD
-SOCKS_PASSWORD=${SOCKS_PASSWORD:-passwordb}
+read -p "请输入 SOCKS5 账号: " SOCKS_USERNAME
+read -s -p "请输入 SOCKS5 密码: " SOCKS_PASSWORD
+echo ""
+read -p "请输入 HTTP 账号: " HTTP_USERNAME
+read -s -p "请输入 HTTP 密码: " HTTP_PASSWORD
+echo ""
 
-read -p "请输入 HTTP 代理用户名 (默认 userb): " HTTP_USERNAME
-HTTP_USERNAME=${HTTP_USERNAME:-userb}
-
-read -p "请输入 HTTP 代理密码 (默认 passwordb): " HTTP_PASSWORD
-HTTP_PASSWORD=${HTTP_PASSWORD:-passwordb}
-
-IP_ADDRESSES=($(hostname -I)) # 获取所有 IP 地址
+read -p "请输入绑定的 IP 地址（用空格分隔）: " -a IP_ADDRESSES
 
 install_xray() {
-    echo "🔧 安装 Xray..."
+    echo "🚀 安装 Xray..."
     apt-get update -y
     apt-get install unzip -y || yum install unzip -y
     wget -qO /tmp/Xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
@@ -52,14 +50,11 @@ generate_config() {
   "inbounds": [
 EOF
 
-    PORT_SOCKS5=$DEFAULT_START_PORT_SOCKS5
-    PORT_HTTP=$DEFAULT_START_PORT_HTTP
-    OUTBOUND_CONFIG=""
-    ROUTING_CONFIG=""
+    PORT_SOCKS5=$START_PORT_SOCKS5
+    PORT_HTTP=$START_PORT_HTTP
+    INDEX=0
 
     for ip in "${IP_ADDRESSES[@]}"; do
-        tag="out_${PORT_SOCKS5}"
-
         cat <<EOF >> /etc/xray/config.json
     {
       "listen": "$ip",
@@ -74,8 +69,7 @@ EOF
           }
         ],
         "udp": true
-      },
-      "tag": "$tag"
+      }
     },
     {
       "listen": "$ip",
@@ -89,74 +83,83 @@ EOF
           }
         ],
         "allowTransparent": false
-      },
-      "tag": "$tag"
+      }
     },
 EOF
-
-        OUTBOUND_CONFIG+=$(cat <<EOF
-    {
-      "protocol": "freedom",
-      "settings": {
-        "sendThrough": "$ip"
-      },
-      "tag": "$tag"
-    },
-EOF
-        )
-
-        ROUTING_CONFIG+=$(cat <<EOF
-    {
-      "type": "field",
-      "inboundTag": ["$tag"],
-      "outboundTag": "$tag"
-    },
-EOF
-        )
-
         ((PORT_SOCKS5++))
         ((PORT_HTTP++))
+        ((INDEX++))
     done
 
-    # 删除最后的逗号
+    # 删除最后一个逗号
     sed -i '$ s/,$//' /etc/xray/config.json
 
     cat <<EOF >> /etc/xray/config.json
   ],
   "outbounds": [
-$OUTBOUND_CONFIG
-  ],
-  "routing": {
-    "rules": [
-$ROUTING_CONFIG
-    ]
-  }
+EOF
+
+    for ip in "${IP_ADDRESSES[@]}"; do
+        cat <<EOF >> /etc/xray/config.json
+    {
+      "protocol": "freedom",
+      "settings": {},
+      "sendThrough": "$ip"
+    },
+EOF
+    done
+
+    # 删除最后一个逗号
+    sed -i '$ s/,$//' /etc/xray/config.json
+
+    cat <<EOF >> /etc/xray/config.json
+  ]
 }
 EOF
     echo "✅ Xray 配置文件已生成."
 }
 
+setup_routing() {
+    echo "⚙️ 配置路由规则..."
+    for ip in "${IP_ADDRESSES[@]}"; do
+        ip rule add from "$ip" table 100
+        ip route add default via "$ip" dev eth0 table 100
+    done
+    echo "✅ 路由规则已应用."
+}
+
 restart_xray() {
     systemctl restart xray.service
-    systemctl enable xray.service
     systemctl status xray.service --no-pager
     echo "✅ Xray 代理已启动."
 }
 
+enable_autostart() {
+    echo "🔄 代理开机自启..."
+    systemctl enable xray
+    systemctl restart xray
+    systemctl status xray --no-pager
+    echo "✅ 代理已设置为开机自启."
+}
+
 display_proxy_info() {
     echo "✅ 代理配置完成!"
+    INDEX=0
     for ip in "${IP_ADDRESSES[@]}"; do
-        echo "🔹 SOCKS5 代理: socks5://$SOCKS_USERNAME:$SOCKS_PASSWORD@$ip:$DEFAULT_START_PORT_SOCKS5"
-        echo "🔹 HTTP  代理: http://$HTTP_USERNAME:$HTTP_PASSWORD@$ip:$DEFAULT_START_PORT_HTTP"
-        ((DEFAULT_START_PORT_SOCKS5++))
-        ((DEFAULT_START_PORT_HTTP++))
+        echo "🔹 SOCKS5 代理: socks5://$SOCKS_USERNAME:$SOCKS_PASSWORD@$ip:$START_PORT_SOCKS5"
+        echo "🔹 HTTP  代理: http://$HTTP_USERNAME:$HTTP_PASSWORD@$ip:$START_PORT_HTTP"
+        ((START_PORT_SOCKS5++))
+        ((START_PORT_HTTP++))
+        ((INDEX++))
     done
 }
 
 main() {
     [ -x "$(command -v xray)" ] || install_xray
     generate_config
+    setup_routing
     restart_xray
+    enable_autostart
     display_proxy_info
 }
 
